@@ -338,9 +338,12 @@ void sync_and_demodulate(float *id, float *qd, long np,
     return;
 }
 
+static const int wspr_expected_frame[] = {1,0,0,1,1,1,0,0,0,0,0,1,0,1,1,1,0,1,1,1,1,1,0,1,0,1,1,0,1,1,0,0,1,0,1,0,1,1,1,1,0,1,0,0,0,0,0,1,0,0,0,0,0,1,1,0,1,0,0,0,0,1,0,1,0,1,1,0,1,0,0,0,0,1,1,1,1,0,1,0,0,1,0,1,0,1,0,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,0,0,0,1,0,0,1,1,0,1,1,0,0,1,0,0,0,1,1,0,1,1,1,0,1,1,0,1,1,1,0,0,1,1,0,1,1,1,1,0,1,1,0,1,1,1,0,1,1,1,0,0,1,1,0,0,1,1,0};
+
 void noncoherent_sequence_detection(float *id, float *qd, long np,
                                     unsigned char *symbols, float *f1,  int *shift1,
-                                    float *drift1, int symfac, int *nblocksize, int *bitmetric)
+                                    float *drift1, int symfac, int *nblocksize, int *bitmetric,
+                                    float *famsymb)
 {
     /************************************************************************
      *  Noncoherent sequence detection for wspr.                            *
@@ -478,6 +481,27 @@ void noncoherent_sequence_detection(float *id, float *qd, long np,
         if( fsymb[i] < -128 ) fsymb[i]=-128.0;
         symbols[i]=fsymb[i] + 128;
     }
+
+    for (i=0; i<162; i++) {
+        float p0=sqrt(is[0][i]*is[0][i] + qs[0][i]*qs[0][i]);
+        float p1=sqrt(is[1][i]*is[1][i] + qs[1][i]*qs[1][i]);
+        float p2=sqrt(is[2][i]*is[2][i] + qs[2][i]*qs[2][i]);
+        float p3=sqrt(is[3][i]*is[3][i] + qs[3][i]*qs[3][i]);
+        if(pr3[i]==1) {
+            if(wspr_expected_frame[i]) {
+                famsymb[i]=p3; //-p1;
+            } else {
+                famsymb[i]=p1; //-p3;
+            }
+        } else {
+            if(wspr_expected_frame[i]) {
+                famsymb[i]=p2; //-p0;
+            } else {
+                famsymb[i]=p0; //-p2;
+            }
+        }
+    }
+
     return;
 }
 
@@ -735,6 +759,7 @@ int main(int argc, char *argv[])
     extern int optind;
     int i,j,k;
     unsigned char *symbols, *decdata, *channel_symbols, *apmask, *cw;
+    float *am_symbols;
     signed char message[]={-9,13,-35,123,57,-39,64,0,0,0,0};
     char *callsign, *grid,  *call_loc_pow;
     char *ptr_to_infile,*ptr_to_infile_suffix;
@@ -779,6 +804,7 @@ int main(int argc, char *argv[])
     loctab=calloc(32768*5,sizeof(char));
     int nh;
     symbols=calloc(nbits*2,sizeof(unsigned char));
+    am_symbols=calloc(nbits*2,sizeof(float));
     apmask=calloc(162,sizeof(unsigned char));
     cw=calloc(162,sizeof(unsigned char));
     decdata=calloc(11,sizeof(unsigned char));
@@ -1327,7 +1353,7 @@ int main(int argc, char *argv[])
                     // Get soft-decision symbols
                     t0 = clock();
                     noncoherent_sequence_detection(idat, qdat, npoints, symbols, &f1,
-                                                   &jittered_shift, &drift1, symfac, &blocksize, &bitmetric);
+                                                   &jittered_shift, &drift1, symfac, &blocksize, &bitmetric, am_symbols);
                     tsync2 += (float)(clock()-t0)/CLOCKS_PER_SEC;
                     
                     sq=0.0;
@@ -1433,6 +1459,13 @@ int main(int argc, char *argv[])
                     } else {
                         break;
                     }
+                }
+                if(!strcmp(callsign, "PU2UID")) {
+                    printf("AM=> ");
+                    for (i=0;i<162;i++) {
+                        printf("%.8f,", am_symbols[i]);
+                    }
+                    printf("\n");
                 }
                 
                 // Remove dupes (same callsign and freq within 4 Hz)
